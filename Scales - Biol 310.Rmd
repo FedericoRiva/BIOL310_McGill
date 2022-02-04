@@ -1,0 +1,558 @@
+---
+title: "McGill University, BIOL 310 - Scaling in ecology"
+author: "Riva, Federico"
+date: "03/02/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **Introduction**
+
+This is a tutorial complementing the lecture on scales, available at <https://github.com/FedericoRiva>. 
+We will focus on three main parts:
+1) spatial data preparation; 
+2) scale dependency in species rarity; and 
+3) scale dependency in biodiversity trends
+
+## Spatial data preparation
+
+```{r, `echo = FALSE`}
+# set up 
+# packages needed in the tutorial
+packages = c("data.table", "raster", "sp", "maptools", "dplyr","vegan")
+
+# load the packages; if missing, install & load 
+package.check <- lapply(
+  packages,
+  FUN = function(x) {
+    if (!require(x, character.only = TRUE)) {
+      install.packages(x, dependencies = TRUE)
+      library(x, character.only = TRUE)
+    }
+  }
+)
+
+# # tpen and clean data
+# library(data.table)
+# 
+# # to handle raster and vector spatial data
+# library(raster)
+# library(sp)
+# 
+# # to get the world map when plotting original data
+# library(maptools)
+# 
+# # data wrangling
+# library(dplyr)
+# 
+# # analysis of diversity
+# library(vegan)
+```
+
+
+```{r}
+query_gbif <- data.table::fread("Data\\query_gbif_2013.csv", header = TRUE) # data downloaded from GBIF https://www.gbif.org/
+
+```
+
+Always look at your data, particularly when dealing with spatial data.
+Let's check if the cabbage white (*Pieris rapae*), a generalist species common in Europe, NA and Oceania, occurs only in CA
+
+```{r}
+example <- query_gbif[query_gbif$species == "Pieris rapae"]
+data(wrld_simpl)
+plot(wrld_simpl, 
+     #xlim=c(min(example$decimalLongitude)-1, max(example$decimalLatitude)+1),   # you can adjust the extent of your map
+     #ylim=c(min(example$decimalLongitude)-1, max(example$decimalLatitude)+1), 
+     axes=TRUE, col="grey")
+points(example$decimalLongitude, example$decimalLatitude, col="blue", pch=20, cex=1.7)
+
+```
+
+All good - Data restricted to Canada, no clear outliers and/or occurrences in the ocean, etc. 
+Note that this plot is based on geographic coordinates, expressed in degrees. To evaluate issues of spatial scales, one needs to account for the area of different raster cells, which require protejcted coordinates, expressed in metric system. 
+
+
+# Open spatial data
+
+Next we will explore some spatial datasets, both in vectorial and raster formats, to familiarize with R spatial; you can find more at <https://rspatial.org/>. 
+We begin by opening a dataset of climatic velocity, approximated using the euclidean distance (i.e., shortest straight line) between two cells with analog climates. The dataset is available at <https://adaptwest.databasin.org/pages/adaptwest-velocitymed/>. 
+```{r}
+
+# open euclidead-distance based velocity; 
+VEL_ED <- raster::raster("Data\\velocity\\velocity.ED.tif") #Velocity Euclidean Distance
+
+VEL_ED 
+
+plot(VEL_ED)
+
+
+```
+
+Two considerations: (i) the spatial grain of this raster is 5 km, and the coordinate system is a projected system in World Geodetic System 1984 (WGS84; <https://en.wikipedia.org/wiki/World_Geodetic_System>)
+
+The plot shows up to 25 km/year migration needed to track future climates
+
+```{r}
+crs <- crs(VEL_ED)
+crs
+```
+
+We will establish the coordinate reference systesm (crs) from VEL_ED as the reference system in our analysis.
+
+Next, let's create a raster of latitudinal values for all the cells present in VEL_ED 
+
+```{r}
+# created a raster having the same extent of VEL_ED, but containing latitude values instead 
+
+LAT <- VEL_ED # copy VEL_ED into a new object, LAT, which will 
+raster_coordinates <- coordinates(VEL_ED) # extract the coordiantes of every cell
+LAT[] <- raster_coordinates[, 2] # replace the content of every cell in LAT with its latitude
+
+plot(LAT)
+
+# remove pixels around NA for LAT
+# create a mask
+mask <- VEL_ED #create a mask based on VEL_ED
+mask[!is.na(mask[])] <- 1 # every value in VEL_ED that is not NA becomes a 1
+LAT <- LAT*mask # multiply the mask for LAT to remove all NAs in VEL_ED
+plot(LAT)
+```
+
+# Aggregate and observe the results 
+
+```{r}
+# aggregate to evaluate the same environmental gradients at different spatial scales
+VEL_ED_50  <- raster::aggregate(VEL_ED, 10) 
+VEL_ED_500 <- raster::aggregate(VEL_ED_50, 10)
+
+LAT_50  <- raster::aggregate(LAT, 10)
+LAT_500 <- raster::aggregate(LAT_50, 10)
+
+# create unique ID cells for every 5, 50 and 500 km cell
+ID <- VEL_ED
+ID_50 <- VEL_ED_50
+ID_500 <- VEL_ED_500
+
+ID[] <- seq(1, ncell(VEL_ED))
+ID_50[] <- seq(1, ncell(VEL_ED_50))
+ID_500[] <- seq(1, ncell(VEL_ED_500))
+
+# crop NA cells
+ID <- ID*mask
+ID_50 <- ID_50* (raster::aggregate(mask,10))
+ID_500 <- ID_500*(raster::aggregate(mask,100))
+
+# check visually the data
+par(mfrow=c(3,3))
+plot(VEL_ED)
+plot(VEL_ED_50)
+plot(VEL_ED_500)
+plot(LAT)
+plot(LAT_50)
+plot(LAT_500)
+plot(ID)
+plot(ID_50)
+plot(ID_500)
+
+dev.off() # clean setting for 9 plots
+```
+
+How does aggregation affects the covariates? 
+How does aggregation affects the area of North America?
+
+# Project the data downloaded from GBIF
+
+```{r}
+
+# project geographic coordinates (from degrees to metric units)
+coordinates(query_gbif) <- c("decimalLongitude", "decimalLatitude")
+proj4string(query_gbif) <- CRS("+init=epsg:4326") # GBIF geographic coordinates "+init=epsg:4326 +proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs +towgs84=0,0,0"
+
+query_gbif <- sp::spTransform(query_gbif, crs) # project according to adaptwest raster data
+query_gbif <- as.data.frame(query_gbif)
+
+# replace name of columns after projection
+names(query_gbif)[names(query_gbif) == 'decimalLongitude'] <- 'x' # changed from degrees to metric
+names(query_gbif)[names(query_gbif) == 'decimalLatitude'] <- 'y' # changed from degrees to metric
+
+# prepare coordinates and data for spatial dataframe
+coordinates_query_gbif <- query_gbif[ , c("x", "y")]   # coordinates; equivalent to query_gbif[, 49:50]
+data_query_gbif   <- query_gbif[ , c(9:10, 31)]   # data you want to keep
+
+# make a SpatialPointsDataFrame object
+spdf <- sp::SpatialPointsDataFrame(coords       = coordinates_query_gbif,
+                                    data        = data_query_gbif, 
+                                    proj4string = crs)
+
+
+```
+
+Now the coordinates in degrees from GBIF are expressed in meters from the origin of the projected reference system.
+Plot them over the raster
+
+```{r}
+plot(spdf)
+
+# note that point() does not overlay points properly
+# double-check with Laura and Janaina
+plot(VEL_ED)
+plot(spdf,
+     #col = spdf$year,
+     add = TRUE)
+
+```
+
+Very weird. Let's check the coordinate reference system
+
+```{r}
+
+crs(VEL_ED)
+crs(spdf)
+
+```
+
+Same crs. This is a very annoying visual glitch in R, but it does not affect point extraction; see <https://stackoverflow.com/questions/28371270/resizing-plot-output-causes-raster-and-points-to-become-misaligned> for a solution
+
+# Check the distribution of checklists across Canada
+
+Now that the occurrence data is projected, we can look at its distribution across Canada with more attention. First, we transform points into a raster, counting the number of occurrences in each 5 km cell. Then, we aggregate our spatial units to evaluate the degree to which community science efforts covered Canada
+
+```{r}
+# look at how many cells have multiple observations
+checklists <- raster::rasterize(coordinates_query_gbif, ID, fun='count')
+
+plot(checklists) # difficult to see, 5 km cells are very small at the continental scale
+par(mfrow=c(1,3))
+plot(log10(checklists))
+plot(log10(aggregate(checklists,10))) # 50 km resolution
+plot(log10(aggregate(checklists,100))) # 500 km resolution
+```
+
+The effects of scaling on sampling coverage are substantial.  
+
+Last, we extract our covariates using the locations of occurrence of butterflies.
+
+```{r}
+# estract covariates
+coordinates_query_gbif$extract_ID <- extract(ID, coordinates_query_gbif[, 1:2])
+coordinates_query_gbif$extract_ID_50 <- extract(ID_50, coordinates_query_gbif[, 1:2])
+coordinates_query_gbif$extract_ID_500 <- extract(ID_500, coordinates_query_gbif[, 1:2])
+
+coordinates_query_gbif$extract_LAT <- extract(LAT, coordinates_query_gbif[, 1:2])
+coordinates_query_gbif$extract_LAT_50 <- extract(LAT_50, coordinates_query_gbif[, 1:2])
+coordinates_query_gbif$extract_LAT_500 <- extract(LAT_500, coordinates_query_gbif[, 1:2])
+
+coordinates_query_gbif$extract_VEL_ED <- extract(VEL_ED, coordinates_query_gbif[, 1:2])
+coordinates_query_gbif$extract_VEL_ED_50 <- extract(VEL_ED_50, coordinates_query_gbif[, 1:2])
+coordinates_query_gbif$extract_VEL_ED_500 <- extract(VEL_ED_500, coordinates_query_gbif[, 1:2])
+
+# # check relationship between LAT and VEL_ED across scales
+# # might take a while; select the next three rows and press CTRL + SHIFT + C to run the code
+# par(mfrow=c(1,3))
+# plot(coordinates_query_gbif$extract_VEL_ED ~ coordinates_query_gbif$extract_LAT)
+# plot(coordinates_query_gbif$extract_VEL_ED_50 ~ coordinates_query_gbif$extract_LAT_50)
+# plot(coordinates_query_gbif$extract_VEL_ED_500 ~ coordinates_query_gbif$extract_LAT_500)
+
+# create a unique coord field to merge with original data
+coordinates_query_gbif$pasted_coord <- paste(coordinates_query_gbif$x, coordinates_query_gbif$y)
+query_gbif$pasted_coord <- paste(query_gbif$x, query_gbif$y)
+```
+
+
+
+## Rarity and its relationship to spatial grain
+
+In the second part of the tutorial, we will look at how spatial scales affect the relative rarity of species in a community. We will contrast patterns of rarity in Canada vs. patterns of rarity in three Provinces (Alberta, Ontario and Quebec) based on our entire dataset. Then, we will resample an equal number of occurrences from the four strata, and assess whether effects are due to are or tu sampling. 
+
+```{r}
+
+# inspecting the species occurrence distribution
+SOD <- as.data.frame(table(query_gbif$species))
+head(SOD)
+# as espected the cabbage white (Pieris rapae) is the most common species in these samples (check your backyard if you have never seen one); monarch butterflies (Danaus plexippus) also count for 12.000 observations. 
+
+
+hist(log10(SOD$Freq))
+# most species have been observed between 10 and 1000 occurrence data
+
+# inspecting the species occurrence distribution at lower spatial levels (Provinces)
+## which provinces we have in the dataframe?
+levels(as.factor(query_gbif$stateProvince))
+
+# provinces
+query_gbif_subset_SOD_AB <- query_gbif[which(query_gbif$stateProvince == "Alberta"), ]
+query_gbif_subset_SOD_QC <- query_gbif[which(query_gbif$stateProvince == "Quebec"), ]
+query_gbif_subset_SOD_ON <- query_gbif[which(query_gbif$stateProvince == "Ontario"), ]
+
+SOD_AB <- as.data.frame(table(query_gbif_subset_SOD_AB$species))
+SOD_QC <- as.data.frame(table(query_gbif_subset_SOD_QC$species))
+SOD_ON <- as.data.frame(table(query_gbif_subset_SOD_ON$species))
+
+## divide by the total number of individuals in each dataset, so as to transform counts into proportions
+SOD$Freq <- SOD$Freq/sum(SOD$Freq) 
+SOD_AB$Freq <- SOD_AB$Freq/sum(SOD_AB$Freq) 
+SOD_QC$Freq <- SOD_QC$Freq/sum(SOD_QC$Freq) 
+SOD_ON$Freq <- SOD_ON$Freq/sum(SOD_ON$Freq) 
+
+
+# plot the curves
+plot(SOD$Freq[order(SOD$Freq)], xaxt='n', frame.plot=TRUE, 
+     main="Species-occurrence ranking plot",
+     ylab="Frequency of occurrence", xlab="Species ranked by frequency of occurrence", pch = 16,
+     ylim = c(0, 0.10))
+
+par(new=TRUE)
+plot(SOD_AB$Freq[order(SOD_AB$Freq)], col = "red", axes=FALSE, frame.plot=TRUE,
+     ylab="", xlab="", pch = 16,
+     ylim = c(0, 0.10))
+
+par(new=TRUE)
+plot(SOD_QC$Freq[order(SOD_QC$Freq)], col = "blue", axes=FALSE, frame.plot=TRUE, 
+     ylab="", xlab="", pch = 16,
+     ylim = c(0, 0.10))
+
+par(new=TRUE)
+plot(SOD_ON$Freq[order(SOD_ON$Freq)], col = "gold", axes=FALSE, frame.plot=TRUE, 
+     ylab="", xlab="", pch = 16,
+     ylim = c(0, 0.10))
+
+legend(1, 0.09, # position of the legend; the x axis goes from 0 to 0.1 (10% 0f the occurrences observed for a given species)
+       legend=c("CA", "AB", "QC", "ON"),
+       col=c("black", "red", "blue", "gold"), lty=1, cex=1)
+
+
+```
+
+These are typical SODs, where many species are rare and a handful tend to dominate the community. 
+What do we infer from this pattern? It could be that, when considering larger spatial scales, there is a higher dominance on the SOD of very common species (black line always under colored lines). However,it could be that differences in sampling effort across region dictate this pattern. Therefore, we repeat the analysis random;ly selecting the same number of individuals in each dataset.
+
+
+```{r}
+
+# how many observations in different datasets?
+nrow(query_gbif)
+nrow(query_gbif_subset_SOD_AB)
+nrow(query_gbif_subset_SOD_QC)
+nrow(query_gbif_subset_SOD_ON)
+
+# let's simulate 1700 individuals, the limiting factor being the spatial unit with the lowest number of individuals
+SOD <- query_gbif[sample(nrow(query_gbif), 1700), ]
+query_gbif_subset_SOD_AB <- query_gbif_subset_SOD_AB[sample(nrow(query_gbif_subset_SOD_AB), 1700), ]
+query_gbif_subset_SOD_QC <- query_gbif_subset_SOD_QC[sample(nrow(query_gbif_subset_SOD_QC), 1700), ]
+query_gbif_subset_SOD_ON <- query_gbif_subset_SOD_ON[sample(nrow(query_gbif_subset_SOD_ON), 1700), ]
+
+SOD <- as.data.frame(table(query_gbif$species))
+SOD_AB <- as.data.frame(table(query_gbif_subset_SOD_AB$species))
+SOD_QC <- as.data.frame(table(query_gbif_subset_SOD_QC$species))
+SOD_ON <- as.data.frame(table(query_gbif_subset_SOD_ON$species))
+
+
+
+##
+SOD$Freq <- SOD$Freq/sum(SOD$Freq) # repeat for all other SODs
+SOD_AB$Freq <- SOD_AB$Freq/sum(SOD_AB$Freq) # repeat for all other SODs
+SOD_QC$Freq <- SOD_QC$Freq/sum(SOD_QC$Freq) # repeat for all other SODs
+SOD_ON$Freq <- SOD_ON$Freq/sum(SOD_ON$Freq) # repeat for all other SODs
+
+
+#par(mfrow=c(1,5))
+plot(SOD$Freq[order(SOD$Freq)], xaxt='n', frame.plot=TRUE, 
+     main="Species-occurrence ranking plot",
+     ylab="Frequency of occurrence", xlab="Species ranked by frequency of occurrence", pch = 16,
+     ylim = c(0, 0.10))
+
+par(new=TRUE)
+plot(SOD_AB$Freq[order(SOD_AB$Freq)], col = "red", axes=FALSE, frame.plot=TRUE,
+     ylab="", xlab="", pch = 16,
+     ylim = c(0, 0.10))
+
+par(new=TRUE)
+plot(SOD_QC$Freq[order(SOD_QC$Freq)], col = "blue", axes=FALSE, frame.plot=TRUE, 
+     ylab="", xlab="", pch = 16,
+     ylim = c(0, 0.10))
+
+par(new=TRUE)
+plot(SOD_ON$Freq[order(SOD_ON$Freq)], col = "gold", axes=FALSE, frame.plot=TRUE, 
+     ylab="", xlab="", pch = 16,
+     ylim = c(0, 0.10))
+
+legend(1, 0.09, # position of the legend; the x axis goes from 0 to 0.1 (10% 0f the occurrences observed for a given species)
+       legend=c("CA", "AB", "QC", "ON"),
+       col=c("black", "red", "blue", "gold"), lty=1, cex=1)
+
+```
+
+The pattern in consistent even when accounting for sampling effort; the hypothesized area effects on the species frequency occurrence rank plot are supported by our dataset. 
+
+## Part 3: Spatiotemporal trends in biodiversity
+
+I prepared a table where the 262 butterfly species of Canada are recorded in ~ 30.000 checklists between 2010 and 2021. For each checklist, I also provided spatial and temporal information (columns 262-280).
+
+```{r}
+final_table <- data.table::fread("Data\\final_table.csv", header = TRUE)
+head(final_table$`Polygonia comma`)
+head(final_table$extract_LAT)
+head(final_table$year)
+```
+
+In the next lines, I created a script that (i) breaks the 30.000 rows table into multiple lists, each containing all the observations occurred at the same site. With "site" we used the "extract_ID" field representing each of the 5-km cell in which checklist were observed earlier. You can choose a different scale by replacing "extract_ID" with "extract_ID_50" or "extract_ID_500".
+
+```{r}
+## split into the 5-km cell communities
+split_5 <- split(final_table, final_table$extract_ID)
+# 4674 sites with at least one checklist
+
+
+```
+
+Then, I removed all sites with less than 10 checklists in 12 years
+
+```{r}
+# we keep only sites with at least 10 checklists
+split_5 <- Filter(function(x) nrow(x) > 10, split_5) 
+# 465 sites
+```
+
+Then, we retained only years wth at least 5 checklists, and removed sited with less than two years
+
+```{r}
+# how many transects per year
+## split each cell in the 12 years
+split_5 <- lapply(split_5, function(x) split(x, x$year))
+for(i in 1:length(split_5)){
+  split_5[[i]] <- Filter(function(x) nrow(x) > 5, split_5[[i]])
+}
+
+# remove sites with less than 2 years
+split_5 <- Filter(function(x) length(x) > 2, split_5) # we assume that visits with only one observations were not checklists 
+```
+
+
+To account for differences in sampling effort, we resample the same number of checklists in each year in each site. We also remove sites with less than 3 years of data.
+
+```{r}
+## randomly select in each site an equal number of checklists
+for(i in 1:length(split_5)){
+  for(j in 1:length(split_5[[i]])){
+    split_5[[i]][[j]] <- split_5[[i]][[j]][sample(nrow(split_5[[i]][[j]]), 5, replace = FALSE), ]
+  }
+}
+
+# remove sites with only one or two years
+split_5 <- Filter(function(x) length(x) > 2, split_5) # we assume that visits with only one observations were not checklists 
+
+```
+
+Now the data is ready to be analyzed. In the next section, we calculate species richness in each of the years for which we had at least 5 checklists, in each of the sites. I also calculated the average Jaccard similarity (<https://en.wikipedia.org/wiki/Jaccard_index>) across years in a site
+
+```{r}
+## calculate species richness
+split_5_richness <- split_5
+for(i in 1:length(split_5_richness)){
+  for(j in 1:length(split_5_richness[[i]])){
+    split_5_richness[[i]][[j]] <- sum(colSums(split_5[[i]][[j]][,1:262]) != 0) # the sum of all columns from column 1 to columns 262 that have at least one occurrence recorded
+  }
+}
+
+for(i in 1:length(split_5_richness)){
+  split_5_richness[[i]] <- do.call(rbind.data.frame, split_5_richness[[i]])
+}
+
+# community table
+split_5_comm <- split_5
+for(i in 1:length(split_5_comm)){
+  for(j in 1:length(split_5_comm[[i]])){
+    split_5_comm[[i]][[j]] <- as.data.frame(t(colSums(split_5_comm[[i]][[j]][,1:262])))
+    split_5_comm[[i]][[j]][split_5_comm[[i]][[j]] > 0] <- 1
+  }
+}
+
+for(i in 1:length(split_5_comm)){
+  split_5_comm[[i]] <- do.call(rbind.data.frame, split_5_comm[[i]])
+}
+
+# calculate the mean Jaccard similarity across the species found in a site in different years 
+split_5_similarity <- split_5_comm
+for(i in 1:length(split_5_similarity)){
+  split_5_similarity[[i]] <- mean(vegdist(split_5_similarity[[i]], method = "jaccard"))
+}
+
+## years relative to each list
+years <- list()
+for(i in 1: length(split_5)){
+years[[i]] <-  as.numeric(names(split_5[[i]])) 
+}
+
+```
+
+Last, we fit some models predicting trends in species richness at each site
+
+```{r}
+
+# trends in richness
+models <- list()
+for(i in 1:length(years)){
+  models[[i]] <- lm(split_5_richness[[i]][,1] ~ years[[i]]) # model where richness at a site is predicted as a function of time
+  models[[i]] <- models[[i]]$coefficients[2] # keep only the year effect
+}
+
+# for(i in 1:length(years)){
+#   models[[i]] <- models[[i]]$coefficients[2]
+# }
+
+# velocity
+split_5_velocity <- split_5
+
+for(i in 1:length(split_5_velocity)){
+    split_5_velocity[[i]] <- split_5_velocity[[i]][[1]]$extract_VEL_ED[[1]]
+  }
+
+split_5_latitude <- split_5
+
+for(i in 1:length(split_5_latitude)){
+  split_5_latitude[[i]] <- split_5_latitude[[i]][[1]]$extract_LAT[[1]]
+}
+
+
+# clean the datasets
+models <- do.call(rbind.data.frame, models)
+colnames(models)[1] <- "slope"
+similarity <-do.call(rbind.data.frame, split_5_similarity)
+colnames(similarity)[1] <- "similarity"
+velocity <- do.call(rbind.data.frame, split_5_velocity)
+colnames(velocity)[1] <- "velocity"
+latitude <- do.call(rbind.data.frame, split_5_latitude)
+colnames(latitude)[1] <- "latitude"
+
+summary(lm(models$slope ~ latitude$latitude))
+
+# # check other relationsips
+# plot(models$slope ~ velocity$velocity)
+# 
+# plot(similarity$similarity ~ latitude$latitude)
+# plot(models$slope ~ similarity$similarity)
+```
+The relationship between richness changes at a site ("slope") and latitude tend to be positive, and at time significant. Because the resampling of checklist in every site is stochastic, you will find results different from your classmates. 
+
+```{r}
+
+#Create a function to generate a continuous color palette
+rbPal <- colorRampPalette(c('blue','red'))
+
+#This adds a column of color values
+# based on the y values
+models$Col <- rbPal(10)[as.numeric(cut(models$slope,breaks = 10))]
+plot(models$slope ~ latitude$latitude,  
+     col = models$Col, 
+     pch = 16,
+     main="Relationship between biodiversity trends and latitude", 
+     xlab="Latitude (m)", ylab="slope of the richness ~ year model")
+```
+
+You can see positive relationships between richness and time in red, and negative in blue. It seems like many sites are characterized by a loss of diversity, except for a few northern sites that seem to have positive diversity trends. 
