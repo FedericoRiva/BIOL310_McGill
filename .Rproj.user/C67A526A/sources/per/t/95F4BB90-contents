@@ -1,0 +1,58 @@
+table <- read.csv("C:/Users/feder/OneDrive/Desktop/GITHUB/BIOL310_McGill/table.csv")
+
+# select only species
+table_spp <- table[,2:262]
+
+# sum of all occurrences for a species
+frequency_species <- colSums(table_spp)
+
+# retain only species seen at least 100 times
+frequency_species <- frequency_species[frequency_species > 100]
+
+# keep their name
+filter <- names(frequency_species)
+
+# filter table species
+table_spp <- table_spp[, (colnames(table_spp) %in% filter)]
+
+# select a species that you like
+species <- as.data.frame(table_spp$Boloria.selene) # Speyeria.atlantis is a northern species
+
+# add a temporal scale; one-year period, two-year period, three-year periods
+species$year <- table$year
+species$year2 <- table$year2
+species$year3 <- table$year3
+
+
+# split the 5000 rows into subsets representing the temporal scale, e.g., 12 one-year periods
+
+####
+#### CHANGE TEMPORAL SCALE HERE
+####
+year_data <- split(species, species$year)
+
+
+frequency_list <- list()
+for(i in 1:length(year_data)){ # for every element of the list (12 year typically)
+frequency_list[[i]] <- mean(year_data[[i]][,1]) # calculate the mean number of time the species was observed that year   
+}
+
+frequency_list <- do.call(rbind.data.frame, frequency_list)
+colnames(frequency_list)[1] <- "frequency"
+
+# add the temporal scale to the frequency dataset
+
+####
+#### CHANGE TEMPORAL SCALE HERE
+####
+
+frequency_list$temporal_scale <- levels(as.factor(species$year)) #change accordingly to your temporal scale
+frequency_list$time_cov <- seq(1, nrow(frequency_list), 1) # this is just a number that represent time. 
+
+#plot(frequency_list$frequency ~ frequency_list$time_cov)
+barplot(frequency_list$frequency ~ frequency_list$temporal_scale)
+
+# statistical relationship
+summary(lm(frequency_list$frequency ~ frequency_list$time_cov))
+
+# for instance, the monarch butterfly changes from a significant trend (annual data) to a non significant trend (biannual data)
