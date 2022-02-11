@@ -17,7 +17,7 @@ knitr::opts_chunk$set(echo = TRUE, fig.pos = "!H", out.extra = "")
 # **Introduction**
 
 This is a tutorial complementing the lecture on scales, available at <https://github.com/FedericoRiva>.
-We will focus on two main parts: 1) effect of scale on occurrence data; 2) dependency in species rarity; and 3) spatiotemporal biodiversity trends.
+We will focus on three parts: 1) effect of scale on density and extent of occurrence data; 2) species rarity across scales; and 3) biodiversity trends through time.
 
 ```{r, echo=TRUE, message=FALSE}
 # set up 
@@ -35,24 +35,11 @@ package.check <- lapply(
   }
 )
 
-# # open and clean data
-# library(data.table)
-# 
-# # to handle raster and vector spatial data
-# library(raster)
-# library(sp)
-# 
-# # to get the world map when plotting original data
-# library(maptools)
-# 
-# # data wrangling
-# library(dplyr)
-# 
-# # analysis of diversity
-# library(vegan)
+
 ```
 
 We will first load a table that contains occurrence data for one species (*Pieris rapae)* in Canada in 2013.
+The table is calles "query_gbif_2013.csv", and is available in the onlyne repository. 
 
 ```{r, echo=FALSE, message=FALSE}
  # downloading data from GBIF https://www.gbif.org/
@@ -61,7 +48,7 @@ query_gbif <- data.table::fread("Data\\query_gbif_2013.csv", header = TRUE)
 ```
 
 Always look at your data, particularly when dealing with spatial data.
-Let's check if the cabbage white (*Pieris rapae*), a generalist species common in Europe, NA and Oceania, occurs only in CA
+Let's check if the cabbage white (*Pieris rapae*), a generalist species common in Europe, North America and Oceania, occurs only in Canada.
 
 ```{r}
 example <- query_gbif[query_gbif$species == "Pieris rapae"]
@@ -76,16 +63,16 @@ points(example$decimalLongitude, example$decimalLatitude, col="blue", pch=20, ce
 ```
 
 All good - Data restricted to Canada, no clear outliers and/or occurrences in the ocean, etc.
-Note that this plot is based on geographic coordinates, expressed in degrees.
+Note that this plot is based on geographic coordinates (i.e., x and y units are degrees).
 
 # Part 1: Effect of scale on occurrence data
 
-To evaluate issues of spatial scales, one needs to account for the area of different raster cells, which require protected coordinates, expressed in metric system.
+To evaluate issues of spatial scales, one needs to account for the grain (area) of different raster cells. This requires protected coordinates, expressed in metric system.
 
 ## Project the data downloaded from GBIF
 
-Here, we are telling R that we want to project spatial data in a specific coordinate system (crs).
-Then, we are transforming the table we have in spatial points that we will plot to a map of Canada.
+The following code tells R that we want our spatial data to be projected in a specific coordinate system (crs).
+Then, we are transforming the original table, containing latitude and langitude of each occurrence data, into a spatial points dataframe that we will plot over a map of North America.
 
 ```{r}
 #telling R what coordinate system we want
@@ -123,8 +110,7 @@ spdf <- sp::SpatialPointsDataFrame(coords       = coordinates_query_gbif,
 
 Now the coordinates in degrees from GBIF are expressed in meters from the origin of the projected reference system.
 
-Now we are plotting a raster of climate velocity change for Canada.
-Climate velocity here is accounted for using the euclidean distance (i.e., shortest straight line) between two cells with analog climates.
+Next, we are plotting a raster of climate velocity change for Canada. Climate velocity here is measured using the euclidean distance (i.e., shortest straight line) between two cells with analog climates.
 The dataset is available at <https://adaptwest.databasin.org/pages/adaptwest-velocitymed/>.
 Then, we are adding the occurrence points of *Pieris rapae*.
 
@@ -139,15 +125,11 @@ plot(spdf,
 ```
 
 Note that some points seem to be in the ocean.
-This is a very annoying visual glitch in R, but it does not affect point extraction; see <https://stackoverflow.com/questions/28371270/resizing-plot-output-causes-raster-and-points-to-become-misaligned> for a solution.
-But don't worry about it now.
+This is a very annoying visual glitch in R, but it does not affect point extraction; see <https://stackoverflow.com/questions/28371270/resizing-plot-output-causes-raster-and-points-to-become-misaligned> for a solution. Don't worry about it now, it does not affect the accuracy of our analysis.
 
 ## Accounting for scales in occurrence data
 
-Now that the occurrence data is projected, we can look at its distribution across Canada with more attention.
-To do this, we transformed points into a raster, counting the number of occurrences in each 5 km cell.
-Then, we aggregated our spatial units to evaluate the degree to which community science efforts covered Canada.
-You can see how it was done in detail in the Supplementary Materials.This is the final plot:
+After projecting the occurrence data, we can look at its density (i.e., number of occurrences per cell) and coverage (i.e., total area of Canada with at least one occurrence) across Canada with more attention.To do this, we transforme our points into a raster ("rasterize"), counting the number of occurrences in each 5 km cell. Then, we manipulate our spatial units to evaluate the degree to which community science efforts covered Canada at different spatial scales. You can see how it was done in detail in the Supplementary Materials.This is the final plot:
 ![Number of occurrences in 5km, 50km and 500 km scales.](Plot_occurrences_scale.png){width="100%"}
 
 **Question 1:** Based on this example and previous topics discussed in class, how does scale affect the way we perceive occurrence data?
@@ -155,8 +137,7 @@ You can see how it was done in detail in the Supplementary Materials.This is the
 # Part 2: Rarity and its relationship to spatial grain
 
 In the second part of the tutorial, we will look at how spatial scales affect the relative rarity of species in a community.
-We will contrast patterns of rarity in Canada vs. patterns of rarity in three Provinces (Alberta, Ontario and Quebec) based on our entire dataset.
-Then, we will resample an equal number of occurrences from the four locations, and assess whether effects are due to are or to sampling.
+We will contrast patterns of rarity in Canada vs. patterns of rarity in three Provinces (Alberta, Ontario and Quebec) based on our entire dataset. We will repeat the analysis resampling an equal number of occurrences from the four spatial units to control for sampling bias, and assess indirectly whether effects are due to area or to sampling.
 
 ```{r}
 
@@ -168,7 +149,7 @@ head(SOD)
 #also count for 12.000 observations. 
 ```
 
-Let's plot an histogram showing the frequency of occurrences in log.
+Let's plot an histogram showing how often a species occur a certain number of times; we log transform the original values, so that the x axis now shows the base 10 logarithm of the frequency of occurrence of different species, and the y axis shows how many species fall into each different occurrence frequency bin.
 
 ```{r}
 hist(log10(SOD$Freq))
@@ -179,7 +160,7 @@ hist(log10(SOD$Freq))
 **Question 2 :** Plot another histogram using unlogged occurrence data and compare the two histograms.
 How does the visualization of the data change?
 
-Now, we will see which provinces we have in the dataframe and we will select occurrences from Alberta, Quebec and Ontario.
+Now, we will see which Provinces are included in the dataframe, and select occurrences from Alberta, Quebec and Ontario.
 
 ```{r}
 # inspecting the species occurrence distribution at lower spatial levels (Provinces)
@@ -196,7 +177,7 @@ SOD_ON <- as.data.frame(table(query_gbif_subset_SOD_ON$species))
 
 ```
 
-Here, we divide by the total number of individuals in each dataset, so as to transform counts into proportions:
+To transform counts into proportions, we divide by the total number of occurrences in each dataset. This allows us to ocmpare different spatial units (e.g., Canada vs Ontario).
 
 ```{r}
 SOD$Freq <- SOD$Freq/sum(SOD$Freq) 
@@ -205,7 +186,7 @@ SOD_QC$Freq <- SOD_QC$Freq/sum(SOD_QC$Freq)
 SOD_ON$Freq <- SOD_ON$Freq/sum(SOD_ON$Freq) 
 ```
 
-And finally plot the curves for AB, QC, ON and Canada.
+And finally, we plot the curves for AB, QC, ON and Canada.
 
 ```{r}
 plot(SOD$Freq[order(SOD$Freq)], xaxt='n', frame.plot=TRUE, 
@@ -237,9 +218,8 @@ legend(1, 0.09, # position of the legend; the x axis goes from 0 to 0.1
 
 ```
 
-These are typical SODs, where many species are rare and a handful tend to dominate the community.
-Note that Canada seems to have less evenness than the other smaller spatial units.
-Why would that be?
+These are typical SODs, where many species are rare and a handful of species tend to dominate the community i nterms of frequency. Note that Canada seems to have less evenness than the other smaller spatial units.
+Why would that be? 
 
 ```{r}
 
@@ -274,7 +254,7 @@ SOD_QC$Freq <- SOD_QC$Freq/sum(SOD_QC$Freq) # repeat for all other SODs
 SOD_ON$Freq <- SOD_ON$Freq/sum(SOD_ON$Freq) # repeat for all other SODs
 ```
 
-And now we are plotting the same graph but using the subset of data in each spatial unit.
+And now we are plotting the same graph but using an unbiased subset of the data, with an equal number of occurrences in in each spatial unit.
 
 ```{r}
 #par(mfrow=c(1,5))
@@ -310,11 +290,15 @@ legend(1, 0.09, # position of the legend; the x axis goes from 0 to 0.1
 
 # Part 3: Spatiotemporal trends in biodiversity
 
-I prepared a table where the 262 butterfly species of Canada are recorded in \~ 30.000 checklists between 2010 and 2021.
-For each checklist, I also provided spatial and temporal information (columns 262-280).
-For this part of the tutorial, I retained only 5000 checklists randomly selected from the original eButterfly dataset (table.csv file) and filtered only species with 100+ observations since 2010.
+On the online repository I prepared a larger table (final_table.csv) where the 262 butterfly species of Canada are recorded in \~ 30.000 checklists recorded between 2010 and 2021 in eButterfly (<https://www.e-butterfly.org/>). For each checklist, I also provided spatial and temporal information (columns 262-280). You might use this for your final report. For this part of the tutorial, we focus on 5000 checklists randomly selected from the original dataset (table.csv file) and filtered only species with 100+ observations since 2010.
 
-With the following code you can: 1. Select one species and one temporal scale; 2. Calculate the proportion of checklists that found their species in every temporal scale; 3. Perform a linear model lm() to see how temporal scales might affect temporal trends observed
+With the following code you can: 
+
+1. Select one species and one temporal scale; 
+
+2. Calculate the proportion of checklists that found their species in every temporal scale; 
+
+3. Perform a linear model lm() to see how temporal scales might affect temporal trends observed
 
 Now, we will load the data and select one species.
 
@@ -326,7 +310,7 @@ table_spp <- table[,2:262]
 
 ```
 
-Then, we sum of all occurrences for a species and select species that were seen at least 100 times
+Then, we sum of all occurrences for a species, select species that were seen at least 100 times, and use this information to subset the original data.
 
 ```{r}
 frequency_species <- colSums(table_spp)
